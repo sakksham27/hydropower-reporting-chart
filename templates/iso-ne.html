@@ -16,9 +16,13 @@
     <a href="/nyiso">NYISO</a>
   </div>
 
-  <div class="search-bar">
-    <input type="text" id="location-id" placeholder="Enter site ID (e.g. 321)">
-    <button id="submit-btn" type="button">Submit</button>
+  <div class="search-bar-wrap">
+    <label class="field-label" for="location-id">Add Site</label>
+    <div class="search-bar">
+      <input type="text" id="location-id" list="site-options" autocomplete="off" placeholder="Enter site ID to add chart (e.g. 321)">
+      <datalist id="site-options"></datalist>
+      <button id="submit-btn" type="button" disabled>Submit</button>
+    </div>
   </div>
   <p class="page-status" id="page-status"></p>
 
@@ -50,14 +54,14 @@
             <span class="chart-card-title">Top 5 Price Records (Past Week)</span>
           </div>
           <div class="top5-wrap">
-            <table class="top5-table">
+            <table class="top5-table" id="top5-table-el">
               <thead>
                 <tr>
                   <th class="top5-rank">#</th>
-                  <th>Site</th>
-                  <th>Day</th>
-                  <th>Hour</th>
-                  <th class="top5-price">Price</th>
+                  <th data-col="site">Site<span class="sort-arrow"></span></th>
+                  <th data-col="day">Day<span class="sort-arrow"></span></th>
+                  <th data-col="hour">Hour<span class="sort-arrow"></span></th>
+                  <th class="top5-price" data-col="price">Price<span class="sort-arrow"></span></th>
                 </tr>
               </thead>
               <tbody id="top5-body">
@@ -90,7 +94,10 @@
   const W = 480, H = 220;
   const plotX0 = M.left, plotX1 = W - M.right;
   const plotY0 = M.top, plotY1 = H - M.bottom;
-  const Y_MIN = -50, Y_MAX = 250;
+  // The shared/comparable range used by the combined chart, and by any
+  // individual chart while its scale toggle is set to "Fixed".
+  const FIXED_Y_MIN = -50, FIXED_Y_MAX = 250;
+  const DEDUP_WINDOW_MS = 10 * 60 * 1000;
 
   // Categorical palette (dataviz skill, slots 1-4: blue, orange, aqua, yellow)
   const PALETTE = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100'];
@@ -98,6 +105,8 @@
   // Monochrome hand/pan icon (inherits the button's text color via currentColor)
   // instead of the default yellow-skinned ✋ emoji.
   const HAND_ICON_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V6a1.5 1.5 0 0 1 3 0v5"/><path d="M11 11V4.5a1.5 1.5 0 0 1 3 0V11"/><path d="M14 11.5V6a1.5 1.5 0 0 1 3 0v7"/><path d="M17 13v-2a1.5 1.5 0 0 1 3 0v6a5 5 0 0 1-5 5h-2a6 6 0 0 1-5-3l-2.5-4.2c-.5-.8-.2-1.9.7-2.3.7-.3 1.5-.1 2 .5L9 15"/></svg>';
+
+  const DOWNLOAD_ICON_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11"/><path d="M7.5 11.5 12 16l4.5-4.5"/><path d="M5 19h14"/></svg>';
 
   const input = document.getElementById('location-id');
   const btn = document.getElementById('submit-btn');
@@ -115,12 +124,126 @@
   const combinedZoomBtn = document.getElementById('combined-zoom');
   const combinedPanBtn = document.getElementById('combined-pan');
   const top5Body = document.getElementById('top5-body');
+  const siteOptions = document.getElementById('site-options');
+
+  fetch('/api/isone/locations')
+    .then(r => r.json())
+    .then(data => {
+      (data.locations || []).forEach(loc => {
+        const opt = document.createElement('option');
+        opt.value = loc.id;
+        opt.label = loc.name;
+        siteOptions.appendChild(opt);
+      });
+    })
+    .catch(() => {});
 
   const activeCharts = new Map();
   let domainStart = null;
   let domainEnd = null;
   let combinedView = null;
   let expanded = null;
+
+  // If exactly one chart in a row (slot pair) is filled, let it span the
+  // full row width instead of leaving an empty cell beside it; hide the
+  // empty sibling entirely so it can't collide with the spanned card.
+  function updateGridLayout() {
+    const pairs = [[slots[0], slots[1]], [slots[2], slots[3]]];
+    pairs.forEach(([a, b]) => {
+      const aFilled = a.children.length > 0;
+      const bFilled = b.children.length > 0;
+      if (aFilled && !bFilled) {
+        a.classList.add('slot-span');
+        b.classList.remove('slot-span');
+        b.style.display = 'none';
+      } else if (bFilled && !aFilled) {
+        b.classList.add('slot-span');
+        a.classList.remove('slot-span');
+        a.style.display = 'none';
+      } else {
+        a.classList.remove('slot-span');
+        b.classList.remove('slot-span');
+        a.style.display = '';
+        b.style.display = '';
+      }
+    });
+  }
+
+  const tooltipEl = document.createElement('div');
+  tooltipEl.className = 'hover-tooltip';
+  document.body.appendChild(tooltipEl);
+
+  function showTooltip(clientX, clientY, text) {
+    tooltipEl.textContent = text;
+    tooltipEl.style.left = (clientX + 14) + 'px';
+    tooltipEl.style.top = (clientY + 14) + 'px';
+    tooltipEl.style.display = 'block';
+  }
+
+  function hideTooltip() {
+    tooltipEl.style.display = 'none';
+  }
+
+  function nearestPointByTime(dataPoints, targetTime) {
+    let best = null, bestDiff = Infinity;
+    for (let i = 0; i < dataPoints.length; i++) {
+      const diff = Math.abs(new Date(dataPoints[i].t).getTime() - targetTime);
+      if (diff < bestDiff) { bestDiff = diff; best = dataPoints[i]; }
+    }
+    return best;
+  }
+
+  function pointInPlot(p) {
+    return p.x >= plotX0 && p.x <= plotX1 && p.y >= plotY0 && p.y <= plotY1;
+  }
+
+  function attachIndividualTooltip(svg, getView, getDataPoints) {
+    svg.addEventListener('mousemove', function (evt) {
+      const view = getView();
+      const dataPoints = getDataPoints();
+      const p = toSvgPoint(svg, evt);
+      if (!view || !dataPoints.length || !pointInPlot(p)) { hideTooltip(); return; }
+      const nearest = nearestPointByTime(dataPoints, invX(view, p.x));
+      if (!nearest) { hideTooltip(); return; }
+      showTooltip(evt.clientX, evt.clientY, formatDay(nearest.t) + ', ' + formatHour(nearest.t) + ', $' + nearest.price.toFixed(2));
+    });
+    svg.addEventListener('mouseleave', hideTooltip);
+  }
+
+  function attachCombinedTooltip(svg, getView) {
+    svg.addEventListener('mousemove', function (evt) {
+      const view = getView();
+      const p = toSvgPoint(svg, evt);
+      if (!view || !pointInPlot(p)) { hideTooltip(); return; }
+      const targetTime = invX(view, p.x);
+      let best = null, bestDist = Infinity, bestSite = null;
+      activeCharts.forEach(state => {
+        if (!state.dataPoints.length) return;
+        const nearest = nearestPointByTime(state.dataPoints, targetTime);
+        if (!nearest) return;
+        const dist = Math.abs(scaleY(view, nearest.price) - p.y);
+        if (dist < bestDist) { bestDist = dist; best = nearest; bestSite = state.siteName; }
+      });
+      if (!best) { hideTooltip(); return; }
+      showTooltip(evt.clientX, evt.clientY, bestSite + ' • ' + formatDay(best.t) + ', ' + formatHour(best.t) + ', $' + best.price.toFixed(2));
+    });
+    svg.addEventListener('mouseleave', hideTooltip);
+  }
+
+  function downloadCsv(siteName, id, dataPoints) {
+    const rows = ['Timestamp,Price ($)'];
+    dataPoints.forEach(p => rows.push(p.t + ',' + p.price));
+    const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const safeName = (siteName || ('site-' + id)).replace(/[^a-z0-9]+/gi, '_');
+    a.download = `iso-ne-${safeName}-${id}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
 
   function mirrorButton(from, to) {
     to.innerHTML = from.innerHTML;
@@ -182,25 +305,52 @@
   }
 
   function fullView() {
-    return { xMin: domainStart, xMax: domainEnd, yMin: Y_MIN, yMax: Y_MAX };
+    return { xMin: domainStart, xMax: domainEnd, yMin: FIXED_Y_MIN, yMax: FIXED_Y_MAX };
   }
 
-  function isZoomed(view) {
-    const fv = fullView();
+  // Per-site auto-scaled range: the data's own min/max plus ~10% padding
+  // (a flat $2 pad if every point is identical, so the view never collapses
+  // to zero height).
+  function autoYRange(dataPoints) {
+    let min = Infinity, max = -Infinity;
+    dataPoints.forEach(p => {
+      if (p.price < min) min = p.price;
+      if (p.price > max) max = p.price;
+    });
+    const span = max - min;
+    const pad = span > 0 ? span * 0.1 : 2;
+    return { yMin: min - pad, yMax: max + pad };
+  }
+
+  // The "full" view for one chart: fixed shared range in Fixed mode (or
+  // before any data has arrived), otherwise auto-scaled to its own data.
+  function chartFullView(state) {
+    if (state.scaleMode === 'fixed' || state.dataPoints.length === 0) return fullView();
+    const range = autoYRange(state.dataPoints);
+    return { xMin: domainStart, xMax: domainEnd, yMin: range.yMin, yMax: range.yMax };
+  }
+
+  // Only worth a full axes/line rebuild if the auto range actually moved by
+  // more than float/rounding noise - avoids re-snapping on every 5-min batch.
+  function needsRescale(oldView, newView) {
+    const eps = Math.max(0.5, 0.01 * (oldView.yMax - oldView.yMin));
+    return Math.abs(newView.yMin - oldView.yMin) > eps || Math.abs(newView.yMax - oldView.yMax) > eps;
+  }
+
+  function isZoomed(view, fv) {
     return Math.abs(view.xMin - fv.xMin) > 1 || Math.abs(view.xMax - fv.xMax) > 1 ||
            Math.abs(view.yMin - fv.yMin) > 0.01 || Math.abs(view.yMax - fv.yMax) > 0.01;
   }
 
-  function updateZoomButton(zoomBtn, view) {
-    const zoomed = isZoomed(view);
+  function updateZoomButton(zoomBtn, view, fv) {
+    const zoomed = isZoomed(view, fv);
     zoomBtn.textContent = zoomed ? '⟲' : '🔍';
     zoomBtn.title = zoomed ? 'Reset zoom' : 'Drag to zoom';
     zoomBtn.setAttribute('aria-label', zoomBtn.title);
     zoomBtn.classList.toggle('is-reset', zoomed);
   }
 
-  function clampPan(view) {
-    const fv = fullView();
+  function clampPan(view, fv) {
     const spanX = view.xMax - view.xMin;
     if (view.xMin < fv.xMin) { view.xMin = fv.xMin; view.xMax = fv.xMin + spanX; }
     if (view.xMax > fv.xMax) { view.xMax = fv.xMax; view.xMin = fv.xMax - spanX; }
@@ -270,17 +420,61 @@
     return h + ':' + d.getMinutes().toString().padStart(2, '0') + ' ' + ampm;
   }
 
-  function recomputeTop5() {
+  // Collapses same-site readings within DEDUP_WINDOW_MS of an already-picked
+  // record into that one record, so a price that's flat across two adjacent
+  // 5-minute samples doesn't count as two separate "top" events.
+  function dedupeTop5(allPoints) {
+    const sorted = allPoints.slice().sort((a, b) => b.price - a.price);
+    const selected = [];
+    for (const candidate of sorted) {
+      const candTime = new Date(candidate.t).getTime();
+      const isDup = selected.some(sel =>
+        sel.site === candidate.site && Math.abs(new Date(sel.t).getTime() - candTime) <= DEDUP_WINDOW_MS
+      );
+      if (isDup) continue;
+      selected.push(candidate);
+      if (selected.length === 5) break;
+    }
+    return selected.map((rec, i) => Object.assign({}, rec, { rank: i + 1 }));
+  }
+
+  let top5Rows = [];
+  let top5Sort = { column: 'price', dir: 'desc' };
+
+  function computeTop5() {
     const all = [];
     activeCharts.forEach(state => {
       state.dataPoints.forEach(p => all.push({ t: p.t, price: p.price, site: state.siteName }));
     });
-    all.sort((a, b) => b.price - a.price);
-    const top5 = all.slice(0, 5);
+    top5Rows = dedupeTop5(all);
+    renderTop5Table();
+  }
 
+  function sortedTop5Rows() {
+    const rows = top5Rows.slice();
+    const mul = top5Sort.dir === 'asc' ? 1 : -1;
+    rows.sort((a, b) => {
+      if (top5Sort.column === 'site') return a.site.localeCompare(b.site) * mul;
+      if (top5Sort.column === 'price') return (a.price - b.price) * mul;
+      // "day" and "hour" both derive from the same timestamp.
+      return (new Date(a.t).getTime() - new Date(b.t).getTime()) * mul;
+    });
+    return rows;
+  }
+
+  function updateSortArrows() {
+    document.querySelectorAll('#top5-table-el th[data-col]').forEach(th => {
+      const arrow = th.querySelector('.sort-arrow');
+      if (!arrow) return;
+      arrow.textContent = th.dataset.col === top5Sort.column ? (top5Sort.dir === 'asc' ? '▲' : '▼') : '';
+    });
+  }
+
+  function renderTop5Table() {
+    updateSortArrows();
     while (top5Body.firstChild) top5Body.removeChild(top5Body.firstChild);
 
-    if (top5.length === 0) {
+    if (top5Rows.length === 0) {
       const row = document.createElement('tr');
       const cell = document.createElement('td');
       cell.colSpan = 5;
@@ -291,14 +485,15 @@
       return;
     }
 
-    top5.forEach((rec, i) => {
+    sortedTop5Rows().forEach(rec => {
       const row = document.createElement('tr');
 
       const rank = document.createElement('td');
       rank.className = 'top5-rank';
-      rank.textContent = String(i + 1);
+      rank.textContent = String(rec.rank);
 
       const site = document.createElement('td');
+      site.className = 'top5-site';
       site.textContent = rec.site;
 
       const day = document.createElement('td');
@@ -319,6 +514,18 @@
       top5Body.appendChild(row);
     });
   }
+
+  document.querySelectorAll('#top5-table-el th[data-col]').forEach(th => {
+    th.addEventListener('click', function () {
+      const col = th.dataset.col;
+      if (top5Sort.column === col) {
+        top5Sort.dir = top5Sort.dir === 'asc' ? 'desc' : 'asc';
+      } else {
+        top5Sort = { column: col, dir: col === 'price' ? 'desc' : 'asc' };
+      }
+      renderTop5Table();
+    });
+  });
 
   function smoothPath(pts) {
     if (pts.length === 0) return '';
@@ -422,27 +629,28 @@
   const MIN_ZOOM_MS = 60 * 1000;
   const MIN_ZOOM_DOLLARS = 1;
 
-  function attachZoomTool(svg, zoomBtn, handBtn, selRect, getView, setView, redraw) {
+  function toSvgPoint(svg, evt) {
+    const pt = svg.createSVGPoint();
+    pt.x = evt.clientX;
+    pt.y = evt.clientY;
+    return pt.matrixTransform(svg.getScreenCTM().inverse());
+  }
+
+  function attachZoomTool(svg, zoomBtn, handBtn, selRect, getView, setView, getFullView, redraw, onUserZoomChange) {
     let dragging = false;
     let start = null;
     let panMode = false;
     let panDragging = false;
     let panStart = null;
 
-    function svgPoint(evt) {
-      const pt = svg.createSVGPoint();
-      pt.x = evt.clientX;
-      pt.y = evt.clientY;
-      return pt.matrixTransform(svg.getScreenCTM().inverse());
-    }
-
     function clamp(v, lo, hi) {
       return Math.max(lo, Math.min(hi, v));
     }
 
     function syncButtons(view) {
-      updateZoomButton(zoomBtn, view);
-      const zoomed = isZoomed(view);
+      const fv = getFullView();
+      updateZoomButton(zoomBtn, view, fv);
+      const zoomed = isZoomed(view, fv);
       handBtn.style.display = zoomed ? '' : 'none';
       if (!zoomed) setPanMode(false);
     }
@@ -468,7 +676,7 @@
         evt.preventDefault();
         return;
       }
-      const p = svgPoint(evt);
+      const p = toSvgPoint(svg, evt);
       start = { x: clamp(p.x, plotX0, plotX1), y: clamp(p.y, plotY0, plotY1) };
       dragging = true;
       selRect.setAttribute('x', start.x);
@@ -495,13 +703,13 @@
           xMax: v.xMax - shiftX,
           yMin: v.yMin + shiftY,
           yMax: v.yMax + shiftY,
-        });
+        }, getFullView());
         setView(newView);
         redraw();
         return;
       }
       if (!dragging) return;
-      const p = svgPoint(evt);
+      const p = toSvgPoint(svg, evt);
       const x = clamp(p.x, plotX0, plotX1);
       const y = clamp(p.y, plotY0, plotY1);
       selRect.setAttribute('x', Math.min(x, start.x));
@@ -538,6 +746,7 @@
       if (newView.yMax - newView.yMin < MIN_ZOOM_DOLLARS) return;
       setView(newView);
       syncButtons(newView);
+      if (onUserZoomChange) onUserZoomChange(true);
       redraw();
     }
 
@@ -546,16 +755,17 @@
 
     function doReset() {
       if (!getView()) return;
-      const fv = fullView();
+      const fv = getFullView();
       setView(fv);
       syncButtons(fv);
+      if (onUserZoomChange) onUserZoomChange(false);
       redraw();
     }
 
     svg.addEventListener('dblclick', doReset);
     zoomBtn.addEventListener('click', function () {
       const view = getView();
-      if (view && isZoomed(view)) doReset();
+      if (view && isZoomed(view, getFullView())) doReset();
     });
 
     return { syncButtons };
@@ -571,8 +781,10 @@
     combinedSelRect,
     () => combinedView,
     v => { combinedView = v; },
+    fullView,
     redrawCombined
   );
+  attachCombinedTooltip(combinedSvg, () => combinedView);
 
   function createChart(id, slot) {
     const color = PALETTE[slots.indexOf(slot)];
@@ -586,6 +798,12 @@
     const title = document.createElement('span');
     title.className = 'chart-card-title';
     title.textContent = 'Loading (ID ' + id + ')...';
+
+    const scaleToggleBtn = document.createElement('button');
+    scaleToggleBtn.className = 'scale-toggle';
+    scaleToggleBtn.type = 'button';
+    scaleToggleBtn.title = 'Toggle Y-axis scale';
+    scaleToggleBtn.textContent = 'Auto';
 
     const zoomBtn = document.createElement('button');
     zoomBtn.className = 'chart-card-expand';
@@ -602,6 +820,13 @@
     handBtn.innerHTML = HAND_ICON_SVG;
     handBtn.style.display = 'none';
 
+    const downloadBtn = document.createElement('button');
+    downloadBtn.className = 'chart-card-expand';
+    downloadBtn.type = 'button';
+    downloadBtn.title = 'Download CSV';
+    downloadBtn.setAttribute('aria-label', 'Download CSV');
+    downloadBtn.innerHTML = DOWNLOAD_ICON_SVG;
+
     const expandBtn = document.createElement('button');
     expandBtn.className = 'chart-card-expand';
     expandBtn.type = 'button';
@@ -615,8 +840,10 @@
     closeBtn.textContent = '×';
 
     header.appendChild(title);
+    header.appendChild(scaleToggleBtn);
     header.appendChild(zoomBtn);
     header.appendChild(handBtn);
+    header.appendChild(downloadBtn);
     header.appendChild(expandBtn);
     header.appendChild(closeBtn);
 
@@ -630,6 +857,7 @@
     card.appendChild(svg);
     card.appendChild(statusEl);
     slot.appendChild(card);
+    updateGridLayout();
 
     const selRect = el('rect', { class: 'zoom-select' });
     selRect.style.display = 'none';
@@ -638,6 +866,8 @@
       source: null,
       dataPoints: [],
       siteName: 'Site ' + id,
+      scaleMode: 'auto',
+      userZoomed: false,
       view: null,
       pathEl: null,
       prevLen: 0,
@@ -660,8 +890,25 @@
       selRect,
       () => state.view,
       v => { state.view = v; },
-      redrawIndividual
+      () => chartFullView(state),
+      redrawIndividual,
+      zoomed => { state.userZoomed = zoomed; }
     );
+
+    scaleToggleBtn.addEventListener('click', function () {
+      state.scaleMode = state.scaleMode === 'auto' ? 'fixed' : 'auto';
+      scaleToggleBtn.textContent = state.scaleMode === 'auto' ? 'Auto' : 'Fixed';
+      scaleToggleBtn.classList.toggle('is-fixed', state.scaleMode === 'fixed');
+      state.userZoomed = false;
+      state.view = chartFullView(state);
+      redrawIndividual();
+      zoomController.syncButtons(state.view);
+    });
+
+    attachIndividualTooltip(svg, () => state.view, () => state.dataPoints);
+    downloadBtn.addEventListener('click', function () {
+      downloadCsv(state.siteName, id, state.dataPoints);
+    });
 
     function addToCombined(name) {
       state.combinedPathEl = el('path', { class: 'chart-line', 'clip-path': 'url(#plot-clip)' });
@@ -688,7 +935,8 @@
       if (state.legendItem) state.legendItem.remove();
       activeCharts.delete(slot);
       card.remove();
-      recomputeTop5();
+      updateGridLayout();
+      computeTop5();
     }
 
     closeBtn.addEventListener('click', destroy);
@@ -728,9 +976,22 @@
       if (msg.points) {
         if (msg.points.length) {
           state.dataPoints = state.dataPoints.concat(msg.points);
-          drawSmoothLine(state.pathEl, state.dataPoints, state.view, state, 'prevLen');
+
+          if (state.scaleMode === 'auto' && !state.userZoomed) {
+            const newFullView = chartFullView(state);
+            if (needsRescale(state.view, newFullView)) {
+              state.view = newFullView;
+              redrawIndividual();
+              zoomController.syncButtons(state.view);
+            } else {
+              drawSmoothLine(state.pathEl, state.dataPoints, state.view, state, 'prevLen');
+            }
+          } else {
+            drawSmoothLine(state.pathEl, state.dataPoints, state.view, state, 'prevLen');
+          }
+
           drawSmoothLine(state.combinedPathEl, state.dataPoints, combinedView, state, 'combinedPrevLen');
-          recomputeTop5();
+          computeTop5();
         }
         statusEl.textContent = `Fetching ${msg.progress} / ${msg.total} windows... (${state.dataPoints.length} points)`;
         return;
@@ -764,11 +1025,16 @@
     pageStatus.textContent = '';
     createChart(id, freeSlot);
     input.value = '';
+    btn.disabled = true;
     input.focus();
   });
 
   input.addEventListener('keydown', function (e) {
-    if (e.key === 'Enter') btn.click();
+    if (e.key === 'Enter' && !btn.disabled) btn.click();
+  });
+
+  input.addEventListener('input', function () {
+    btn.disabled = !input.value.trim();
   });
 })();
 </script>

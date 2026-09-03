@@ -85,6 +85,16 @@ def fetch_window(day, interval, location_id):
     return points
 
 
+@app.route("/api/isone/locations")
+def isone_locations():
+    names = get_location_names()
+    locations = sorted(
+        ({"id": loc_id, "name": name} for loc_id, name in names.items()),
+        key=lambda loc: loc["name"],
+    )
+    return {"locations": locations}
+
+
 @app.route("/api/isone/stream")
 def isone_stream():
     location_id = request.args.get("id", "").strip()
