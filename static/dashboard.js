@@ -1,93 +1,9 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ISO-NE - Hydropower Reporting Chart</title>
-<link rel="stylesheet" href="/static/style.css">
-</head>
-<body>
-
-  <h1 class="title">Hydropower Reporting Tool</h1>
-
-  <div class="nav">
-    <a href="/">Home</a>
-    <a href="/iso-ne" class="active">ISO-NE</a>
-    <a href="/nyiso">NYISO</a>
-  </div>
-
-  <div class="search-bar-wrap">
-    <label class="field-label" for="location-id">Add Site</label>
-    <div class="search-bar">
-      <input type="text" id="location-id" list="site-options" autocomplete="off" placeholder="Enter site ID to add chart (e.g. 321)">
-      <datalist id="site-options"></datalist>
-      <button id="submit-btn" type="button" disabled>Submit</button>
-    </div>
-  </div>
-  <p class="page-status" id="page-status"></p>
-
-  <div class="sections">
-    <div class="section section-a">
-      <div class="charts-grid" id="charts-grid">
-        <div class="chart-slot" data-slot="0"></div>
-        <div class="chart-slot" data-slot="1"></div>
-        <div class="chart-slot" data-slot="2"></div>
-        <div class="chart-slot" data-slot="3"></div>
-      </div>
-    </div>
-    <div class="section section-b">
-      <div class="section-b-split">
-        <div class="section-b-half section-b-top">
-          <div class="chart-card">
-            <div class="chart-card-header">
-              <span class="chart-card-title">All Sites</span>
-              <button class="chart-card-expand" id="combined-zoom" type="button" title="Drag to zoom" aria-label="Drag to zoom">🔍</button>
-              <button class="chart-card-expand" id="combined-pan" type="button" title="Pan around" aria-label="Pan around" style="display:none"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V6a1.5 1.5 0 0 1 3 0v5"/><path d="M11 11V4.5a1.5 1.5 0 0 1 3 0V11"/><path d="M14 11.5V6a1.5 1.5 0 0 1 3 0v7"/><path d="M17 13v-2a1.5 1.5 0 0 1 3 0v6a5 5 0 0 1-5 5h-2a6 6 0 0 1-5-3l-2.5-4.2c-.5-.8-.2-1.9.7-2.3.7-.3 1.5-.1 2 .5L9 15"/></svg></button>
-              <button class="chart-card-expand" id="combined-expand" type="button" title="Expand" aria-label="Expand">⤢</button>
-            </div>
-            <div class="chart-legend" id="combined-legend"></div>
-            <svg id="combined-chart" viewBox="0 0 480 220"></svg>
-          </div>
-        </div>
-        <div class="section-b-half section-b-bottom">
-          <div class="chart-card-header">
-            <span class="chart-card-title">Top 5 Price Records (Past Week)</span>
-          </div>
-          <div class="top5-wrap">
-            <table class="top5-table" id="top5-table-el">
-              <thead>
-                <tr>
-                  <th class="top5-rank">#</th>
-                  <th data-col="site">Site<span class="sort-arrow"></span></th>
-                  <th data-col="day">Day<span class="sort-arrow"></span></th>
-                  <th data-col="hour">Hour<span class="sort-arrow"></span></th>
-                  <th class="top5-price" data-col="price">Price<span class="sort-arrow"></span></th>
-                </tr>
-              </thead>
-              <tbody id="top5-body">
-                <tr><td colspan="5" class="top5-empty">Submit a site to populate this table.</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div class="chart-modal hidden" id="chart-modal">
-    <div class="chart-modal-content">
-      <div class="chart-modal-header">
-        <span class="chart-modal-title" id="chart-modal-title"></span>
-        <button class="chart-card-expand" id="chart-modal-zoom" type="button" title="Drag to zoom" aria-label="Drag to zoom">🔍</button>
-        <button class="chart-card-expand" id="chart-modal-pan" type="button" title="Pan around" aria-label="Pan around" style="display:none"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V6a1.5 1.5 0 0 1 3 0v5"/><path d="M11 11V4.5a1.5 1.5 0 0 1 3 0V11"/><path d="M14 11.5V6a1.5 1.5 0 0 1 3 0v7"/><path d="M17 13v-2a1.5 1.5 0 0 1 3 0v6a5 5 0 0 1-5 5h-2a6 6 0 0 1-5-3l-2.5-4.2c-.5-.8-.2-1.9.7-2.3.7-.3 1.5-.1 2 .5L9 15"/></svg></button>
-        <button class="chart-card-expand" id="chart-modal-close" type="button" title="Close" aria-label="Close">×</button>
-      </div>
-      <div class="chart-modal-body" id="chart-modal-body"></div>
-    </div>
-  </div>
-
-<script>
-(function () {
+// Shared dashboard logic for the ISO-NE and NYISO pages. Both pages render
+// the identical markup (search bar, 4-chart grid, combined chart, Top 5
+// table, expand modal) and just call initDashboard() with their own API
+// endpoints and CSV filename prefix - everything else (zoom/pan, auto-scale,
+// tooltips, sorting, dedupe) is shared so the two stay in feature parity.
+function initDashboard(config) {
   const MAX_CHARTS = 4;
   const NS = 'http://www.w3.org/2000/svg';
   const M = { left: 44, right: 10, top: 10, bottom: 20 };
@@ -126,7 +42,7 @@
   const top5Body = document.getElementById('top5-body');
   const siteOptions = document.getElementById('site-options');
 
-  fetch('/api/isone/locations')
+  fetch(config.locationsUrl)
     .then(r => r.json())
     .then(data => {
       (data.locations || []).forEach(loc => {
@@ -238,7 +154,7 @@
     const a = document.createElement('a');
     a.href = url;
     const safeName = (siteName || ('site-' + id)).replace(/[^a-z0-9]+/gi, '_');
-    a.download = `iso-ne-${safeName}-${id}.csv`;
+    a.download = `${config.filePrefix}-${safeName}-${id}.csv`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -331,7 +247,7 @@
   }
 
   // Only worth a full axes/line rebuild if the auto range actually moved by
-  // more than float/rounding noise - avoids re-snapping on every 5-min batch.
+  // more than float/rounding noise - avoids re-snapping on every batch.
   function needsRescale(oldView, newView) {
     const eps = Math.max(0.5, 0.01 * (oldView.yMax - oldView.yMin));
     return Math.abs(newView.yMin - oldView.yMin) > eps || Math.abs(newView.yMax - oldView.yMax) > eps;
@@ -422,7 +338,7 @@
 
   // Collapses same-site readings within DEDUP_WINDOW_MS of an already-picked
   // record into that one record, so a price that's flat across two adjacent
-  // 5-minute samples doesn't count as two separate "top" events.
+  // samples doesn't count as two separate "top" events.
   function dedupeTop5(allPoints) {
     const sorted = allPoints.slice().sort((a, b) => b.price - a.price);
     const selected = [];
@@ -944,7 +860,7 @@
       openModal(svg, title.textContent, zoomBtn, handBtn);
     });
 
-    state.source = new EventSource('/api/isone/stream?id=' + encodeURIComponent(id));
+    state.source = new EventSource(config.streamUrl + '?id=' + encodeURIComponent(id));
 
     state.source.onmessage = function (evt) {
       const msg = JSON.parse(evt.data);
@@ -1036,8 +952,4 @@
   input.addEventListener('input', function () {
     btn.disabled = !input.value.trim();
   });
-})();
-</script>
-
-</body>
-</html>
+}
