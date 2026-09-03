@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ISO-NE - Hydropower Reporting Chart</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <h1 class="title">Hydropower Reporting Tool</h1>
+
+  <div class="nav">
+    <a href="index.html">Home</a>
+    <a href="iso-ne.html" class="active">ISO-NE</a>
+    <a href="nyiso.html">NYISO</a>
+  </div>
+
+  <div class="search-bar">
+    <input type="text" id="location-id" placeholder="Enter site ID (e.g. 321)">
+    <button id="submit-btn" type="button">Submit</button>
+  </div>
+  <p class="page-status" id="page-status"></p>
+
+  <div class="sections">
+    <div class="section section-a">
+      <div class="charts-grid" id="charts-grid">
+        <div class="chart-slot" data-slot="0"></div>
+        <div class="chart-slot" data-slot="1"></div>
+        <div class="chart-slot" data-slot="2"></div>
+        <div class="chart-slot" data-slot="3"></div>
+      </div>
+    </div>
+    <div class="section section-b">
+      <div class="section-b-split">
+        <div class="section-b-half section-b-top">
+          <div class="chart-card">
+            <div class="chart-card-header">
+              <span class="chart-card-title">All Sites</span>
+              <button class="chart-card-expand" id="combined-zoom" type="button" title="Zoom to rectangle" aria-label="Zoom to rectangle">🔍</button>
+              <button class="chart-card-expand" id="combined-reset" type="button" title="Reset zoom" aria-label="Reset zoom">⟲</button>
+              <button class="chart-card-expand" id="combined-expand" type="button" title="Expand" aria-label="Expand">⤢</button>
+            </div>
+            <div class="chart-legend" id="combined-legend"></div>
+            <svg id="combined-chart" viewBox="0 0 480 220"></svg>
+          </div>
+        </div>
+        <div class="section-b-half section-b-bottom">
+          <p class="charts-empty">Coming soon</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="chart-modal hidden" id="chart-modal">
+    <div class="chart-modal-content">
+      <div class="chart-modal-header">
+        <span class="chart-modal-title" id="chart-modal-title"></span>
+        <button class="chart-card-expand" id="chart-modal-zoom" type="button" title="Zoom to rectangle" aria-label="Zoom to rectangle">🔍</button>
+        <button class="chart-card-expand" id="chart-modal-reset" type="button" title="Reset zoom" aria-label="Reset zoom">⟲</button>
+        <button class="chart-card-expand" id="chart-modal-close" type="button" title="Close" aria-label="Close">×</button>
+      </div>
+      <div class="chart-modal-body" id="chart-modal-body"></div>
+    </div>
+  </div>
+
+<script>
+(function () {
+  const MAX_CHARTS = 4;
+  const NS = 'http://www.w3.org/2000/svg';
+  const M = { left: 44, right: 10, top: 10, bottom: 20 };
+  const W = 480, H = 220;
+  const plotX0 = M.left, plotX1 = W - M.right;
+  const plotY0 = M.top, plotY1 = H - M.bottom;
+  const Y_MIN = -50, Y_MAX = 250;
+
+  // Categorical palette (dataviz skill, slots 1-4: blue, orange, aqua, yellow)
+  const PALETTE = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100'];
+
+  const input = document.getElementById('location-id');
+  const btn = document.getElementById('submit-btn');
+  const pageStatus = document.getElementById('page-status');
+  const slots = Array.from(document.querySelectorAll('.chart-slot'));
+  const combinedSvg = document.getElementById('combined-chart');
+  const legendEl = document.getElementById('combined-legend');
+  const modal = document.getElementById('chart-modal');
+  const modalTitle = document.getElementById('chart-modal-title');
+  const modalBody = document.getElementById('chart-modal-body');
+  const modalCloseBtn = document.getElementById('chart-modal-close');
+  const modalZoomBtn = document.getElementById('chart-modal-zoom');
+  const modalResetBtn = document.getElementById('chart-modal-reset');
+  const combinedExpandBtn = document.getElementById('combined-expand');
+  const combinedZoomBtn = document.getElementById('combined-zoom');
+  const combinedResetBtn = document.getElementById('combined-reset');
+
+  const activeCharts = new Map();
+  let domainStart = null;
+  let domainEnd = null;
+  let combinedView = null;
+  let expanded = null;
+
+  function openModal(svgEl, titleText, toolBtn, resetBtn) {
+    if (expanded) closeModal();
+    const placeholder = document.createComment('chart-slot');
+    svgEl.replaceWith(placeholder);
+    modalBody.appendChild(svgEl);
+    modalTitle.textContent = titleText;
+    modal.classList.remove('hidden');
+    modalZoomBtn.classList.toggle('active', toolBtn.classList.contains('active'));
+    expanded = { svgEl, placeholder, toolBtn, resetBtn };
+  }
+
+  function closeModal() {
+    if (!expanded) return;
+    expanded.placeholder.replaceWith(expanded.svgEl);
+    modal.classList.add('hidden');
+    expanded = null;
+  }
+
+  modalCloseBtn.addEventListener('click', closeModal);
+  modal.addEventListener('click', function (e) {
+    if (e.target === modal) closeModal();
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') closeModal();
+  });
+
+  modalZoomBtn.addEventListener('click', function () {
+    if (!expanded) return;
+    expanded.toolBtn.click();
+    modalZoomBtn.classList.toggle('active', expanded.toolBtn.classList.contains('active'));
+  });
+
+  modalResetBtn.addEventListener('click', function () {
+    if (!expanded) return;
+    expanded.resetBtn.click();
+  });
+
+  combinedExpandBtn.addEventListener('click', function () {
+    openModal(combinedSvg, 'All Sites', combinedZoomBtn, combinedResetBtn);
+  });
+
+  function el(tag, attrs) {
+    const e = document.createElementNS(NS, tag);
+    for (const k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+
+  function fullView() {
+    return { xMin: domainStart, xMax: domainEnd, yMin: Y_MIN, yMax: Y_MAX };
+  }
+
+  function scaleX(view, t) {
+    return plotX0 + (t - view.xMin) / (view.xMax - view.xMin) * (plotX1 - plotX0);
+  }
+
+  function scaleY(view, v) {
+    return plotY1 - (v - view.yMin) / (view.yMax - view.yMin) * (plotY1 - plotY0);
+  }
+
+  function invX(view, px) {
+    return view.xMin + (px - plotX0) / (plotX1 - plotX0) * (view.xMax - view.xMin);
+  }
+
+  function invY(view, py) {
+    return view.yMax - (py - plotY0) / (plotY1 - plotY0) * (view.yMax - view.yMin);
+  }
+
+  function niceStep(range, maxTicks) {
+    const rough = range / maxTicks;
+    const mag = Math.pow(10, Math.floor(Math.log10(rough)));
+    const norm = rough / mag;
+    let step = 10;
+    if (norm < 1.5) step = 1;
+    else if (norm < 3) step = 2;
+    else if (norm < 7) step = 5;
+    return step * mag;
+  }
+
+  const TIME_STEPS = [5, 10, 15, 30, 60, 120, 180, 360, 720, 1440, 2880, 4320, 10080].map(m => m * 60000);
+
+  function niceTimeStep(rangeMs, maxTicks) {
+    for (const c of TIME_STEPS) {
+      if (rangeMs / c <= maxTicks) return c;
+    }
+    return TIME_STEPS[TIME_STEPS.length - 1];
+  }
+
+  function smoothPath(pts) {
+    if (pts.length === 0) return '';
+    if (pts.length === 1) return `M ${pts[0].x} ${pts[0].y}`;
+    let d = `M ${pts[0].x} ${pts[0].y}`;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const p0 = pts[i - 1] || pts[i];
+      const p1 = pts[i];
+      const p2 = pts[i + 1];
+      const p3 = pts[i + 2] || p2;
+      const cp1x = p1.x + (p2.x - p0.x) / 6;
+      const cp1y = p1.y + (p2.y - p0.y) / 6;
+      const cp2x = p2.x - (p3.x - p1.x) / 6;
+      const cp2y = p2.y - (p3.y - p1.y) / 6;
+      d += ` C ${cp1x.toFixed(2)} ${cp1y.toFixed(2)}, ${cp2x.toFixed(2)} ${cp2y.toFixed(2)}, ${p2.x.toFixed(2)} ${p2.y.toFixed(2)}`;
+    }
+    return d;
+  }
+
+  function buildAxes(svg, view) {
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+
+    const yStep = niceStep(view.yMax - view.yMin, 5);
+    const yStart = Math.ceil(view.yMin / yStep) * yStep;
+    for (let v = yStart; v <= view.yMax + 1e-6; v += yStep) {
+      const y = scaleY(view, v);
+      svg.appendChild(el('line', { class: 'chart-axis', x1: plotX0, x2: plotX1, y1: y, y2: y }));
+      const label = el('text', { class: 'chart-axis-label', x: 4, y: y + 3 });
+      label.textContent = '$' + Math.round(v);
+      svg.appendChild(label);
+    }
+
+    const xStep = niceTimeStep(view.xMax - view.xMin, 6);
+    const xStart = Math.ceil(view.xMin / xStep) * xStep;
+    const showTime = xStep < 24 * 3600 * 1000;
+    for (let t = xStart; t <= view.xMax + 1; t += xStep) {
+      const x = scaleX(view, t);
+      svg.appendChild(el('line', { class: 'chart-axis', x1: x, x2: x, y1: plotY0, y2: plotY1 }));
+      const d = new Date(t);
+      const label = el('text', { class: 'chart-axis-label', x: x + 3, y: plotY1 + 12 });
+      label.textContent = showTime
+        ? d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0')
+        : (d.getMonth() + 1) + '/' + d.getDate();
+      svg.appendChild(label);
+    }
+  }
+
+  function ensureDomain(rangeStart, rangeEnd) {
+    if (domainStart !== null) return;
+    domainStart = new Date(rangeStart + 'T00:00:00').getTime();
+    domainEnd = new Date(rangeEnd + 'T00:00:00').getTime() + 24 * 3600 * 1000;
+    combinedView = fullView();
+    buildAxes(combinedSvg, combinedView);
+    combinedSvg.appendChild(combinedSelRect);
+  }
+
+  function drawSmoothLine(pathEl, dataPoints, view, state, prevKey) {
+    const pts = dataPoints.map(p => ({
+      x: scaleX(view, new Date(p.t).getTime()),
+      y: scaleY(view, p.price),
+    }));
+    pathEl.setAttribute('d', smoothPath(pts));
+
+    const newLen = pathEl.getTotalLength();
+    const grown = newLen - state[prevKey];
+    if (grown > 0) {
+      pathEl.style.transition = 'none';
+      pathEl.style.strokeDasharray = newLen;
+      pathEl.style.strokeDashoffset = grown;
+      pathEl.getBoundingClientRect();
+      pathEl.style.transition = 'stroke-dashoffset 550ms ease-out';
+      pathEl.style.strokeDashoffset = '0';
+    }
+    state[prevKey] = newLen;
+  }
+
+  function redrawLineFull(pathEl, dataPoints, view, state, prevKey) {
+    const pts = dataPoints.map(p => ({
+      x: scaleX(view, new Date(p.t).getTime()),
+      y: scaleY(view, p.price),
+    }));
+    pathEl.setAttribute('d', smoothPath(pts));
+    pathEl.style.transition = 'none';
+    pathEl.style.strokeDasharray = '';
+    pathEl.style.strokeDashoffset = '';
+    state[prevKey] = pathEl.getTotalLength();
+  }
+
+  function redrawCombined() {
+    buildAxes(combinedSvg, combinedView);
+    activeCharts.forEach(state => {
+      if (state.combinedPathEl) {
+        combinedSvg.appendChild(state.combinedPathEl);
+        redrawLineFull(state.combinedPathEl, state.dataPoints, combinedView, state, 'combinedPrevLen');
+      }
+    });
+    combinedSvg.appendChild(combinedSelRect);
+  }
+
+  function attachZoomTool(svg, toolBtn, resetBtn, selRect, getView, setView, redraw) {
+    let active = false;
+    let dragging = false;
+    let start = null;
+
+    function svgPoint(evt) {
+      const pt = svg.createSVGPoint();
+      pt.x = evt.clientX;
+      pt.y = evt.clientY;
+      return pt.matrixTransform(svg.getScreenCTM().inverse());
+    }
+
+    function clamp(v, lo, hi) {
+      return Math.max(lo, Math.min(hi, v));
+    }
+
+    toolBtn.addEventListener('click', function () {
+      active = !active;
+      toolBtn.classList.toggle('active', active);
+      svg.classList.toggle('zoom-cursor', active);
+    });
+
+    svg.addEventListener('mousedown', function (evt) {
+      if (!active || !getView()) return;
+      const p = svgPoint(evt);
+      start = { x: clamp(p.x, plotX0, plotX1), y: clamp(p.y, plotY0, plotY1) };
+      dragging = true;
+      selRect.setAttribute('x', start.x);
+      selRect.setAttribute('y', start.y);
+      selRect.setAttribute('width', 0);
+      selRect.setAttribute('height', 0);
+      selRect.style.display = 'block';
+      if (selRect.parentNode !== svg) svg.appendChild(selRect);
+      evt.preventDefault();
+    });
+
+    svg.addEventListener('mousemove', function (evt) {
+      if (!dragging) return;
+      const p = svgPoint(evt);
+      const x = clamp(p.x, plotX0, plotX1);
+      const y = clamp(p.y, plotY0, plotY1);
+      selRect.setAttribute('x', Math.min(x, start.x));
+      selRect.setAttribute('y', Math.min(y, start.y));
+      selRect.setAttribute('width', Math.abs(x - start.x));
+      selRect.setAttribute('height', Math.abs(y - start.y));
+    });
+
+    function endDrag() {
+      if (!dragging) return;
+      dragging = false;
+      selRect.style.display = 'none';
+      const w = parseFloat(selRect.getAttribute('width'));
+      const h = parseFloat(selRect.getAttribute('height'));
+      if (w < 6 || h < 6) return;
+      const x1 = parseFloat(selRect.getAttribute('x'));
+      const y1 = parseFloat(selRect.getAttribute('y'));
+      const view = getView();
+      const newView = {
+        xMin: invX(view, x1),
+        xMax: invX(view, x1 + w),
+        yMin: invY(view, y1 + h),
+        yMax: invY(view, y1),
+      };
+      setView(newView);
+      redraw();
+    }
+
+    svg.addEventListener('mouseup', endDrag);
+    svg.addEventListener('mouseleave', endDrag);
+
+    function doReset() {
+      if (!getView()) return;
+      setView(fullView());
+      redraw();
+    }
+
+    svg.addEventListener('dblclick', doReset);
+    resetBtn.addEventListener('click', doReset);
+  }
+
+  const combinedSelRect = el('rect', { class: 'zoom-select' });
+  combinedSelRect.style.display = 'none';
+
+  attachZoomTool(
+    combinedSvg,
+    combinedZoomBtn,
+    combinedResetBtn,
+    combinedSelRect,
+    () => combinedView,
+    v => { combinedView = v; },
+    redrawCombined
+  );
+
+  function createChart(id, slot) {
+    const color = PALETTE[slots.indexOf(slot)];
+
+    const card = document.createElement('div');
+    card.className = 'chart-card';
+
+    const header = document.createElement('div');
+    header.className = 'chart-card-header';
+
+    const title = document.createElement('span');
+    title.className = 'chart-card-title';
+    title.textContent = 'Loading (ID ' + id + ')...';
+
+    const zoomBtn = document.createElement('button');
+    zoomBtn.className = 'chart-card-expand';
+    zoomBtn.type = 'button';
+    zoomBtn.title = 'Zoom to rectangle';
+    zoomBtn.setAttribute('aria-label', 'Zoom to rectangle');
+    zoomBtn.textContent = '🔍';
+
+    const resetBtn = document.createElement('button');
+    resetBtn.className = 'chart-card-expand';
+    resetBtn.type = 'button';
+    resetBtn.title = 'Reset zoom';
+    resetBtn.setAttribute('aria-label', 'Reset zoom');
+    resetBtn.textContent = '⟲';
+
+    const expandBtn = document.createElement('button');
+    expandBtn.className = 'chart-card-expand';
+    expandBtn.type = 'button';
+    expandBtn.title = 'Expand';
+    expandBtn.setAttribute('aria-label', 'Expand');
+    expandBtn.textContent = '⤢';
+
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'chart-card-close';
+    closeBtn.type = 'button';
+    closeBtn.textContent = '×';
+
+    header.appendChild(title);
+    header.appendChild(zoomBtn);
+    header.appendChild(resetBtn);
+    header.appendChild(expandBtn);
+    header.appendChild(closeBtn);
+
+    const svg = el('svg', { viewBox: `0 0 ${W} ${H}` });
+
+    const statusEl = document.createElement('p');
+    statusEl.className = 'chart-card-status';
+    statusEl.textContent = 'Starting...';
+
+    card.appendChild(header);
+    card.appendChild(svg);
+    card.appendChild(statusEl);
+    slot.appendChild(card);
+
+    const selRect = el('rect', { class: 'zoom-select' });
+    selRect.style.display = 'none';
+
+    const state = {
+      source: null,
+      dataPoints: [],
+      view: null,
+      pathEl: null,
+      prevLen: 0,
+      combinedPathEl: null,
+      combinedPrevLen: 0,
+      legendItem: null,
+    };
+
+    function redrawIndividual() {
+      buildAxes(svg, state.view);
+      svg.appendChild(state.pathEl);
+      svg.appendChild(selRect);
+      redrawLineFull(state.pathEl, state.dataPoints, state.view, state, 'prevLen');
+    }
+
+    attachZoomTool(
+      svg,
+      zoomBtn,
+      resetBtn,
+      selRect,
+      () => state.view,
+      v => { state.view = v; },
+      redrawIndividual
+    );
+
+    function addToCombined(name) {
+      state.combinedPathEl = el('path', { class: 'chart-line' });
+      state.combinedPathEl.style.stroke = color;
+      combinedSvg.appendChild(state.combinedPathEl);
+
+      const item = document.createElement('span');
+      item.className = 'chart-legend-item';
+      const dot = document.createElement('span');
+      dot.className = 'chart-legend-dot';
+      dot.style.background = color;
+      const label = document.createElement('span');
+      label.textContent = name;
+      item.appendChild(dot);
+      item.appendChild(label);
+      legendEl.appendChild(item);
+      state.legendItem = item;
+    }
+
+    function destroy() {
+      if (expanded && expanded.svgEl === svg) closeModal();
+      if (state.source) state.source.close();
+      if (state.combinedPathEl) state.combinedPathEl.remove();
+      if (state.legendItem) state.legendItem.remove();
+      activeCharts.delete(slot);
+      card.remove();
+    }
+
+    closeBtn.addEventListener('click', destroy);
+    expandBtn.addEventListener('click', function () {
+      openModal(svg, title.textContent, zoomBtn, resetBtn);
+    });
+
+    state.source = new EventSource('/api/isone/stream?id=' + encodeURIComponent(id));
+
+    state.source.onmessage = function (evt) {
+      const msg = JSON.parse(evt.data);
+
+      if (msg.error) {
+        statusEl.textContent = 'Error: ' + msg.error;
+        state.source.close();
+        return;
+      }
+
+      if (msg.range_start) {
+        ensureDomain(msg.range_start, msg.range_end);
+        state.view = fullView();
+        buildAxes(svg, state.view);
+        state.pathEl = el('path', { class: 'chart-line' });
+        state.pathEl.style.stroke = color;
+        svg.appendChild(state.pathEl);
+        svg.appendChild(selRect);
+        state.prevLen = 0;
+
+        addToCombined(msg.name);
+        title.textContent = msg.name;
+        statusEl.textContent = `Fetching 0 / ${msg.total} windows...`;
+        return;
+      }
+
+      if (msg.points) {
+        if (msg.points.length) {
+          state.dataPoints = state.dataPoints.concat(msg.points);
+          drawSmoothLine(state.pathEl, state.dataPoints, state.view, state, 'prevLen');
+          drawSmoothLine(state.combinedPathEl, state.dataPoints, combinedView, state, 'combinedPrevLen');
+        }
+        statusEl.textContent = `Fetching ${msg.progress} / ${msg.total} windows... (${state.dataPoints.length} points)`;
+        return;
+      }
+
+      if (msg.done) {
+        statusEl.textContent = `Retrieved: ${state.dataPoints.length} data points`;
+        state.source.close();
+      }
+    };
+
+    state.source.onerror = function () {
+      statusEl.textContent = 'Connection lost.';
+      state.source.close();
+    };
+
+    activeCharts.set(slot, state);
+  }
+
+  btn.addEventListener('click', function () {
+    const id = input.value.trim();
+    if (!id) {
+      pageStatus.textContent = 'Enter a site ID first.';
+      return;
+    }
+    const freeSlot = slots.find(s => !activeCharts.has(s));
+    if (!freeSlot) {
+      pageStatus.textContent = `Maximum of ${MAX_CHARTS} graphs — remove one (×) to add another.`;
+      return;
+    }
+    pageStatus.textContent = '';
+    createChart(id, freeSlot);
+    input.value = '';
+    input.focus();
+  });
+
+  input.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') btn.click();
+  });
+})();
+</script>
+
+</body>
+</html>
