@@ -273,7 +273,7 @@ h1.title {
   color: var(--text);
 }
 
-.chart-card-expand.active {
+.chart-card-expand.is-reset {
   color: var(--accent);
   background: var(--accent-tint);
   border-radius: 4px;
@@ -284,10 +284,10 @@ h1.title {
   flex: 1;
   width: 100%;
   min-height: 0;
+  cursor: crosshair;
 }
 
-.chart-card svg.zoom-cursor,
-.chart-modal-body svg.zoom-cursor {
+.chart-modal-body svg {
   cursor: crosshair;
 }
 

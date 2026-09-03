@@ -37,8 +37,7 @@
           <div class="chart-card">
             <div class="chart-card-header">
               <span class="chart-card-title">All Sites</span>
-              <button class="chart-card-expand" id="combined-zoom" type="button" title="Zoom to rectangle" aria-label="Zoom to rectangle">🔍</button>
-              <button class="chart-card-expand" id="combined-reset" type="button" title="Reset zoom" aria-label="Reset zoom">⟲</button>
+              <button class="chart-card-expand" id="combined-zoom" type="button" title="Drag to zoom" aria-label="Drag to zoom">🔍</button>
               <button class="chart-card-expand" id="combined-expand" type="button" title="Expand" aria-label="Expand">⤢</button>
             </div>
             <div class="chart-legend" id="combined-legend"></div>
@@ -56,8 +55,7 @@
     <div class="chart-modal-content">
       <div class="chart-modal-header">
         <span class="chart-modal-title" id="chart-modal-title"></span>
-        <button class="chart-card-expand" id="chart-modal-zoom" type="button" title="Zoom to rectangle" aria-label="Zoom to rectangle">🔍</button>
-        <button class="chart-card-expand" id="chart-modal-reset" type="button" title="Reset zoom" aria-label="Reset zoom">⟲</button>
+        <button class="chart-card-expand" id="chart-modal-zoom" type="button" title="Drag to zoom" aria-label="Drag to zoom">🔍</button>
         <button class="chart-card-expand" id="chart-modal-close" type="button" title="Close" aria-label="Close">×</button>
       </div>
       <div class="chart-modal-body" id="chart-modal-body"></div>
@@ -88,10 +86,8 @@
   const modalBody = document.getElementById('chart-modal-body');
   const modalCloseBtn = document.getElementById('chart-modal-close');
   const modalZoomBtn = document.getElementById('chart-modal-zoom');
-  const modalResetBtn = document.getElementById('chart-modal-reset');
   const combinedExpandBtn = document.getElementById('combined-expand');
   const combinedZoomBtn = document.getElementById('combined-zoom');
-  const combinedResetBtn = document.getElementById('combined-reset');
 
   const activeCharts = new Map();
   let domainStart = null;
@@ -99,15 +95,17 @@
   let combinedView = null;
   let expanded = null;
 
-  function openModal(svgEl, titleText, toolBtn, resetBtn) {
+  function openModal(svgEl, titleText, toolBtn) {
     if (expanded) closeModal();
     const placeholder = document.createComment('chart-slot');
     svgEl.replaceWith(placeholder);
     modalBody.appendChild(svgEl);
     modalTitle.textContent = titleText;
     modal.classList.remove('hidden');
-    modalZoomBtn.classList.toggle('active', toolBtn.classList.contains('active'));
-    expanded = { svgEl, placeholder, toolBtn, resetBtn };
+    modalZoomBtn.textContent = toolBtn.textContent;
+    modalZoomBtn.title = toolBtn.title;
+    modalZoomBtn.setAttribute('aria-label', toolBtn.title);
+    expanded = { svgEl, placeholder, toolBtn };
   }
 
   function closeModal() {
@@ -128,16 +126,13 @@
   modalZoomBtn.addEventListener('click', function () {
     if (!expanded) return;
     expanded.toolBtn.click();
-    modalZoomBtn.classList.toggle('active', expanded.toolBtn.classList.contains('active'));
-  });
-
-  modalResetBtn.addEventListener('click', function () {
-    if (!expanded) return;
-    expanded.resetBtn.click();
+    modalZoomBtn.textContent = expanded.toolBtn.textContent;
+    modalZoomBtn.title = expanded.toolBtn.title;
+    modalZoomBtn.setAttribute('aria-label', expanded.toolBtn.title);
   });
 
   combinedExpandBtn.addEventListener('click', function () {
-    openModal(combinedSvg, 'All Sites', combinedZoomBtn, combinedResetBtn);
+    openModal(combinedSvg, 'All Sites', combinedZoomBtn);
   });
 
   function el(tag, attrs) {
@@ -149,6 +144,30 @@
   function fullView() {
     return { xMin: domainStart, xMax: domainEnd, yMin: Y_MIN, yMax: Y_MAX };
   }
+
+  function isZoomed(view) {
+    const fv = fullView();
+    return Math.abs(view.xMin - fv.xMin) > 1 || Math.abs(view.xMax - fv.xMax) > 1 ||
+           Math.abs(view.yMin - fv.yMin) > 0.01 || Math.abs(view.yMax - fv.yMax) > 0.01;
+  }
+
+  function updateZoomButton(zoomBtn, view) {
+    const zoomed = isZoomed(view);
+    zoomBtn.textContent = zoomed ? '⟲' : '🔍';
+    zoomBtn.title = zoomed ? 'Reset zoom' : 'Drag to zoom';
+    zoomBtn.setAttribute('aria-label', zoomBtn.title);
+    zoomBtn.classList.toggle('is-reset', zoomed);
+  }
+
+  // A single clip rect (shared by every chart's plot area, which are all
+  // the same size) keeps zoomed-in lines from drawing over the axis labels
+  // or past the chart's edge when data points fall outside the current view.
+  const clipDefsSvg = el('svg', { width: 0, height: 0, style: 'position:absolute' });
+  const clipPathEl = el('clipPath', { id: 'plot-clip' });
+  clipPathEl.appendChild(el('rect', { x: plotX0, y: plotY0, width: plotX1 - plotX0, height: plotY1 - plotY0 }));
+  clipDefsSvg.appendChild(el('defs', {}));
+  clipDefsSvg.firstChild.appendChild(clipPathEl);
+  document.body.appendChild(clipDefsSvg);
 
   function scaleX(view, t) {
     return plotX0 + (t - view.xMin) / (view.xMax - view.xMin) * (plotX1 - plotX0);
@@ -238,6 +257,7 @@
     domainEnd = new Date(rangeEnd + 'T00:00:00').getTime() + 24 * 3600 * 1000;
     combinedView = fullView();
     buildAxes(combinedSvg, combinedView);
+    updateZoomButton(combinedZoomBtn, combinedView);
     combinedSvg.appendChild(combinedSelRect);
   }
 
@@ -284,8 +304,10 @@
     combinedSvg.appendChild(combinedSelRect);
   }
 
-  function attachZoomTool(svg, toolBtn, resetBtn, selRect, getView, setView, redraw) {
-    let active = false;
+  const MIN_ZOOM_MS = 60 * 1000;
+  const MIN_ZOOM_DOLLARS = 1;
+
+  function attachZoomTool(svg, zoomBtn, selRect, getView, setView, redraw) {
     let dragging = false;
     let start = null;
 
@@ -300,14 +322,8 @@
       return Math.max(lo, Math.min(hi, v));
     }
 
-    toolBtn.addEventListener('click', function () {
-      active = !active;
-      toolBtn.classList.toggle('active', active);
-      svg.classList.toggle('zoom-cursor', active);
-    });
-
     svg.addEventListener('mousedown', function (evt) {
-      if (!active || !getView()) return;
+      if (!getView()) return;
       const p = svgPoint(evt);
       start = { x: clamp(p.x, plotX0, plotX1), y: clamp(p.y, plotY0, plotY1) };
       dragging = true;
@@ -341,13 +357,19 @@
       const x1 = parseFloat(selRect.getAttribute('x'));
       const y1 = parseFloat(selRect.getAttribute('y'));
       const view = getView();
+      // Clamp strictly to the current view's own bounds (not just the drag
+      // pixels, which are already clamped) so float rounding at the very
+      // edge of the plot can never push the new view outside the old one.
       const newView = {
-        xMin: invX(view, x1),
-        xMax: invX(view, x1 + w),
-        yMin: invY(view, y1 + h),
-        yMax: invY(view, y1),
+        xMin: clamp(invX(view, x1), view.xMin, view.xMax),
+        xMax: clamp(invX(view, x1 + w), view.xMin, view.xMax),
+        yMin: clamp(invY(view, y1 + h), view.yMin, view.yMax),
+        yMax: clamp(invY(view, y1), view.yMin, view.yMax),
       };
+      if (newView.xMax - newView.xMin < MIN_ZOOM_MS) return;
+      if (newView.yMax - newView.yMin < MIN_ZOOM_DOLLARS) return;
       setView(newView);
+      updateZoomButton(zoomBtn, newView);
       redraw();
     }
 
@@ -356,12 +378,17 @@
 
     function doReset() {
       if (!getView()) return;
-      setView(fullView());
+      const fv = fullView();
+      setView(fv);
+      updateZoomButton(zoomBtn, fv);
       redraw();
     }
 
     svg.addEventListener('dblclick', doReset);
-    resetBtn.addEventListener('click', doReset);
+    zoomBtn.addEventListener('click', function () {
+      const view = getView();
+      if (view && isZoomed(view)) doReset();
+    });
   }
 
   const combinedSelRect = el('rect', { class: 'zoom-select' });
@@ -370,7 +397,6 @@
   attachZoomTool(
     combinedSvg,
     combinedZoomBtn,
-    combinedResetBtn,
     combinedSelRect,
     () => combinedView,
     v => { combinedView = v; },
@@ -393,16 +419,9 @@
     const zoomBtn = document.createElement('button');
     zoomBtn.className = 'chart-card-expand';
     zoomBtn.type = 'button';
-    zoomBtn.title = 'Zoom to rectangle';
-    zoomBtn.setAttribute('aria-label', 'Zoom to rectangle');
+    zoomBtn.title = 'Drag to zoom';
+    zoomBtn.setAttribute('aria-label', 'Drag to zoom');
     zoomBtn.textContent = '🔍';
-
-    const resetBtn = document.createElement('button');
-    resetBtn.className = 'chart-card-expand';
-    resetBtn.type = 'button';
-    resetBtn.title = 'Reset zoom';
-    resetBtn.setAttribute('aria-label', 'Reset zoom');
-    resetBtn.textContent = '⟲';
 
     const expandBtn = document.createElement('button');
     expandBtn.className = 'chart-card-expand';
@@ -418,7 +437,6 @@
 
     header.appendChild(title);
     header.appendChild(zoomBtn);
-    header.appendChild(resetBtn);
     header.appendChild(expandBtn);
     header.appendChild(closeBtn);
 
@@ -457,7 +475,6 @@
     attachZoomTool(
       svg,
       zoomBtn,
-      resetBtn,
       selRect,
       () => state.view,
       v => { state.view = v; },
@@ -465,7 +482,7 @@
     );
 
     function addToCombined(name) {
-      state.combinedPathEl = el('path', { class: 'chart-line' });
+      state.combinedPathEl = el('path', { class: 'chart-line', 'clip-path': 'url(#plot-clip)' });
       state.combinedPathEl.style.stroke = color;
       combinedSvg.appendChild(state.combinedPathEl);
 
@@ -493,7 +510,7 @@
 
     closeBtn.addEventListener('click', destroy);
     expandBtn.addEventListener('click', function () {
-      openModal(svg, title.textContent, zoomBtn, resetBtn);
+      openModal(svg, title.textContent, zoomBtn);
     });
 
     state.source = new EventSource('/api/isone/stream?id=' + encodeURIComponent(id));
@@ -511,7 +528,8 @@
         ensureDomain(msg.range_start, msg.range_end);
         state.view = fullView();
         buildAxes(svg, state.view);
-        state.pathEl = el('path', { class: 'chart-line' });
+        updateZoomButton(zoomBtn, state.view);
+        state.pathEl = el('path', { class: 'chart-line', 'clip-path': 'url(#plot-clip)' });
         state.pathEl.style.stroke = color;
         svg.appendChild(state.pathEl);
         svg.appendChild(selRect);
