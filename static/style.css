@@ -273,7 +273,8 @@ h1.title {
   color: var(--text);
 }
 
-.chart-card-expand.is-reset {
+.chart-card-expand.is-reset,
+.chart-card-expand.is-active {
   color: var(--accent);
   background: var(--accent-tint);
   border-radius: 4px;
@@ -289,6 +290,16 @@ h1.title {
 
 .chart-modal-body svg {
   cursor: crosshair;
+}
+
+.chart-card svg.pan-mode,
+.chart-modal-body svg.pan-mode {
+  cursor: grab;
+}
+
+.chart-card svg.pan-mode.panning,
+.chart-modal-body svg.pan-mode.panning {
+  cursor: grabbing;
 }
 
 .zoom-select {

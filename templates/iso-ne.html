@@ -38,6 +38,7 @@
             <div class="chart-card-header">
               <span class="chart-card-title">All Sites</span>
               <button class="chart-card-expand" id="combined-zoom" type="button" title="Drag to zoom" aria-label="Drag to zoom">🔍</button>
+              <button class="chart-card-expand" id="combined-pan" type="button" title="Pan around" aria-label="Pan around" style="display:none">✋</button>
               <button class="chart-card-expand" id="combined-expand" type="button" title="Expand" aria-label="Expand">⤢</button>
             </div>
             <div class="chart-legend" id="combined-legend"></div>
@@ -74,6 +75,7 @@
       <div class="chart-modal-header">
         <span class="chart-modal-title" id="chart-modal-title"></span>
         <button class="chart-card-expand" id="chart-modal-zoom" type="button" title="Drag to zoom" aria-label="Drag to zoom">🔍</button>
+        <button class="chart-card-expand" id="chart-modal-pan" type="button" title="Pan around" aria-label="Pan around" style="display:none">✋</button>
         <button class="chart-card-expand" id="chart-modal-close" type="button" title="Close" aria-label="Close">×</button>
       </div>
       <div class="chart-modal-body" id="chart-modal-body"></div>
@@ -104,8 +106,10 @@
   const modalBody = document.getElementById('chart-modal-body');
   const modalCloseBtn = document.getElementById('chart-modal-close');
   const modalZoomBtn = document.getElementById('chart-modal-zoom');
+  const modalPanBtn = document.getElementById('chart-modal-pan');
   const combinedExpandBtn = document.getElementById('combined-expand');
   const combinedZoomBtn = document.getElementById('combined-zoom');
+  const combinedPanBtn = document.getElementById('combined-pan');
   const top5Body = document.getElementById('top5-body');
 
   const activeCharts = new Map();
@@ -114,17 +118,25 @@
   let combinedView = null;
   let expanded = null;
 
-  function openModal(svgEl, titleText, toolBtn) {
+  function mirrorButton(from, to) {
+    to.textContent = from.textContent;
+    to.title = from.title;
+    to.setAttribute('aria-label', from.title);
+    to.classList.toggle('is-reset', from.classList.contains('is-reset'));
+    to.classList.toggle('is-active', from.classList.contains('is-active'));
+    to.style.display = from.style.display;
+  }
+
+  function openModal(svgEl, titleText, toolBtn, panBtn) {
     if (expanded) closeModal();
     const placeholder = document.createComment('chart-slot');
     svgEl.replaceWith(placeholder);
     modalBody.appendChild(svgEl);
     modalTitle.textContent = titleText;
     modal.classList.remove('hidden');
-    modalZoomBtn.textContent = toolBtn.textContent;
-    modalZoomBtn.title = toolBtn.title;
-    modalZoomBtn.setAttribute('aria-label', toolBtn.title);
-    expanded = { svgEl, placeholder, toolBtn };
+    mirrorButton(toolBtn, modalZoomBtn);
+    mirrorButton(panBtn, modalPanBtn);
+    expanded = { svgEl, placeholder, toolBtn, panBtn };
   }
 
   function closeModal() {
@@ -145,13 +157,18 @@
   modalZoomBtn.addEventListener('click', function () {
     if (!expanded) return;
     expanded.toolBtn.click();
-    modalZoomBtn.textContent = expanded.toolBtn.textContent;
-    modalZoomBtn.title = expanded.toolBtn.title;
-    modalZoomBtn.setAttribute('aria-label', expanded.toolBtn.title);
+    mirrorButton(expanded.toolBtn, modalZoomBtn);
+    mirrorButton(expanded.panBtn, modalPanBtn);
+  });
+
+  modalPanBtn.addEventListener('click', function () {
+    if (!expanded) return;
+    expanded.panBtn.click();
+    mirrorButton(expanded.panBtn, modalPanBtn);
   });
 
   combinedExpandBtn.addEventListener('click', function () {
-    openModal(combinedSvg, 'All Sites', combinedZoomBtn);
+    openModal(combinedSvg, 'All Sites', combinedZoomBtn, combinedPanBtn);
   });
 
   function el(tag, attrs) {
@@ -176,6 +193,17 @@
     zoomBtn.title = zoomed ? 'Reset zoom' : 'Drag to zoom';
     zoomBtn.setAttribute('aria-label', zoomBtn.title);
     zoomBtn.classList.toggle('is-reset', zoomed);
+  }
+
+  function clampPan(view) {
+    const fv = fullView();
+    const spanX = view.xMax - view.xMin;
+    if (view.xMin < fv.xMin) { view.xMin = fv.xMin; view.xMax = fv.xMin + spanX; }
+    if (view.xMax > fv.xMax) { view.xMax = fv.xMax; view.xMin = fv.xMax - spanX; }
+    const spanY = view.yMax - view.yMin;
+    if (view.yMin < fv.yMin) { view.yMin = fv.yMin; view.yMax = fv.yMin + spanY; }
+    if (view.yMax > fv.yMax) { view.yMax = fv.yMax; view.yMin = fv.yMax - spanY; }
+    return view;
   }
 
   // A single clip rect (shared by every chart's plot area, which are all
@@ -340,7 +368,7 @@
     domainEnd = new Date(rangeEnd + 'T00:00:00').getTime() + 24 * 3600 * 1000;
     combinedView = fullView();
     buildAxes(combinedSvg, combinedView);
-    updateZoomButton(combinedZoomBtn, combinedView);
+    combinedZoomController.syncButtons(combinedView);
     combinedSvg.appendChild(combinedSelRect);
   }
 
@@ -390,9 +418,12 @@
   const MIN_ZOOM_MS = 60 * 1000;
   const MIN_ZOOM_DOLLARS = 1;
 
-  function attachZoomTool(svg, zoomBtn, selRect, getView, setView, redraw) {
+  function attachZoomTool(svg, zoomBtn, handBtn, selRect, getView, setView, redraw) {
     let dragging = false;
     let start = null;
+    let panMode = false;
+    let panDragging = false;
+    let panStart = null;
 
     function svgPoint(evt) {
       const pt = svg.createSVGPoint();
@@ -405,8 +436,34 @@
       return Math.max(lo, Math.min(hi, v));
     }
 
+    function syncButtons(view) {
+      updateZoomButton(zoomBtn, view);
+      const zoomed = isZoomed(view);
+      handBtn.style.display = zoomed ? '' : 'none';
+      if (!zoomed) setPanMode(false);
+    }
+
+    function setPanMode(on) {
+      panMode = on;
+      handBtn.classList.toggle('is-active', panMode);
+      svg.classList.toggle('pan-mode', panMode);
+      svg.classList.toggle('panning', false);
+    }
+
+    handBtn.addEventListener('click', function () {
+      if (!getView()) return;
+      setPanMode(!panMode);
+    });
+
     svg.addEventListener('mousedown', function (evt) {
       if (!getView()) return;
+      if (panMode) {
+        panDragging = true;
+        panStart = { x: evt.clientX, y: evt.clientY, view: { ...getView() } };
+        svg.classList.add('panning');
+        evt.preventDefault();
+        return;
+      }
       const p = svgPoint(evt);
       start = { x: clamp(p.x, plotX0, plotX1), y: clamp(p.y, plotY0, plotY1) };
       dragging = true;
@@ -420,6 +477,25 @@
     });
 
     svg.addEventListener('mousemove', function (evt) {
+      if (panDragging) {
+        // Scale raw pointer-pixel deltas into SVG viewBox units (the CSS-rendered
+        // size can differ from the 480x220 viewBox), then into data units.
+        const ctm = svg.getScreenCTM();
+        const dxSvg = (evt.clientX - panStart.x) / ctm.a;
+        const dySvg = (evt.clientY - panStart.y) / ctm.d;
+        const v = panStart.view;
+        const shiftX = dxSvg / (plotX1 - plotX0) * (v.xMax - v.xMin);
+        const shiftY = dySvg / (plotY1 - plotY0) * (v.yMax - v.yMin);
+        const newView = clampPan({
+          xMin: v.xMin - shiftX,
+          xMax: v.xMax - shiftX,
+          yMin: v.yMin + shiftY,
+          yMax: v.yMax + shiftY,
+        });
+        setView(newView);
+        redraw();
+        return;
+      }
       if (!dragging) return;
       const p = svgPoint(evt);
       const x = clamp(p.x, plotX0, plotX1);
@@ -431,6 +507,11 @@
     });
 
     function endDrag() {
+      if (panDragging) {
+        panDragging = false;
+        svg.classList.remove('panning');
+        return;
+      }
       if (!dragging) return;
       dragging = false;
       selRect.style.display = 'none';
@@ -452,7 +533,7 @@
       if (newView.xMax - newView.xMin < MIN_ZOOM_MS) return;
       if (newView.yMax - newView.yMin < MIN_ZOOM_DOLLARS) return;
       setView(newView);
-      updateZoomButton(zoomBtn, newView);
+      syncButtons(newView);
       redraw();
     }
 
@@ -463,7 +544,7 @@
       if (!getView()) return;
       const fv = fullView();
       setView(fv);
-      updateZoomButton(zoomBtn, fv);
+      syncButtons(fv);
       redraw();
     }
 
@@ -472,14 +553,17 @@
       const view = getView();
       if (view && isZoomed(view)) doReset();
     });
+
+    return { syncButtons };
   }
 
   const combinedSelRect = el('rect', { class: 'zoom-select' });
   combinedSelRect.style.display = 'none';
 
-  attachZoomTool(
+  const combinedZoomController = attachZoomTool(
     combinedSvg,
     combinedZoomBtn,
+    combinedPanBtn,
     combinedSelRect,
     () => combinedView,
     v => { combinedView = v; },
@@ -506,6 +590,14 @@
     zoomBtn.setAttribute('aria-label', 'Drag to zoom');
     zoomBtn.textContent = '🔍';
 
+    const handBtn = document.createElement('button');
+    handBtn.className = 'chart-card-expand';
+    handBtn.type = 'button';
+    handBtn.title = 'Pan around';
+    handBtn.setAttribute('aria-label', 'Pan around');
+    handBtn.textContent = '✋';
+    handBtn.style.display = 'none';
+
     const expandBtn = document.createElement('button');
     expandBtn.className = 'chart-card-expand';
     expandBtn.type = 'button';
@@ -520,6 +612,7 @@
 
     header.appendChild(title);
     header.appendChild(zoomBtn);
+    header.appendChild(handBtn);
     header.appendChild(expandBtn);
     header.appendChild(closeBtn);
 
@@ -556,9 +649,10 @@
       redrawLineFull(state.pathEl, state.dataPoints, state.view, state, 'prevLen');
     }
 
-    attachZoomTool(
+    const zoomController = attachZoomTool(
       svg,
       zoomBtn,
+      handBtn,
       selRect,
       () => state.view,
       v => { state.view = v; },
@@ -595,7 +689,7 @@
 
     closeBtn.addEventListener('click', destroy);
     expandBtn.addEventListener('click', function () {
-      openModal(svg, title.textContent, zoomBtn);
+      openModal(svg, title.textContent, zoomBtn, handBtn);
     });
 
     state.source = new EventSource('/api/isone/stream?id=' + encodeURIComponent(id));
@@ -613,7 +707,7 @@
         ensureDomain(msg.range_start, msg.range_end);
         state.view = fullView();
         buildAxes(svg, state.view);
-        updateZoomButton(zoomBtn, state.view);
+        zoomController.syncButtons(state.view);
         state.pathEl = el('path', { class: 'chart-line', 'clip-path': 'url(#plot-clip)' });
         state.pathEl.style.stroke = color;
         svg.appendChild(state.pathEl);
