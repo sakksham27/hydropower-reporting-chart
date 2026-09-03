@@ -5,9 +5,9 @@ import re
 from datetime import date, datetime, timedelta
 
 import requests
-from flask import Flask, Response, request, send_from_directory
+from flask import Flask, Response, render_template, request
 
-app = Flask(__name__, static_folder=None)
+app = Flask(__name__)
 
 INTERVALS = ["00-04", "04-08", "08-12", "12-16", "16-20", "20-24"]
 DAYS_BACK = 7
@@ -125,13 +125,18 @@ def isone_stream():
 
 
 @app.route("/")
-def root():
-    return send_from_directory(".", "index.html")
+def home():
+    return render_template("index.html")
 
 
-@app.route("/<path:filename>")
-def static_files(filename):
-    return send_from_directory(".", filename)
+@app.route("/iso-ne")
+def iso_ne_page():
+    return render_template("iso-ne.html")
+
+
+@app.route("/nyiso")
+def nyiso_page():
+    return render_template("nyiso.html")
 
 
 if __name__ == "__main__":

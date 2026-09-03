@@ -22,18 +22,27 @@ NYISO and a Home tab exist as placeholders for future work.
 
 ```bash
 pip install -r requirements.txt
-python3 server.py
+python3 app.py
 ```
 
 Then open http://localhost:3215.
 
 ## Project layout
 
-- `server.py` - Flask backend; streams filtered ISO-NE LMP data over
-  Server-Sent Events at `/api/isone/stream?id=<location_id>`.
-- `index.html`, `iso-ne.html`, `nyiso.html` - the three pages (Home, ISO-NE,
-  NYISO).
-- `style.css` - shared styling.
+```
+.
+├── app.py                 # Flask app: page routes + the SSE data-streaming endpoint
+├── requirements.txt
+├── templates/              # Jinja/HTML pages, rendered via render_template()
+│   ├── index.html          # Home
+│   ├── iso-ne.html         # ISO-NE dashboard
+│   └── nyiso.html          # NYISO (placeholder)
+└── static/
+    └── style.css            # shared styling
+```
+
+Routes: `/` (Home), `/iso-ne`, `/nyiso`, and
+`/api/isone/stream?id=<location_id>` (Server-Sent Events data stream).
 
 ## License
 
