@@ -266,6 +266,12 @@ h1.title {
   line-height: 1;
   padding: 2px 4px;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+}
+
+.chart-card-expand svg {
+  display: block;
 }
 
 .chart-card-close:hover,

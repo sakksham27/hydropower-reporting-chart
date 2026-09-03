@@ -38,7 +38,7 @@
             <div class="chart-card-header">
               <span class="chart-card-title">All Sites</span>
               <button class="chart-card-expand" id="combined-zoom" type="button" title="Drag to zoom" aria-label="Drag to zoom">🔍</button>
-              <button class="chart-card-expand" id="combined-pan" type="button" title="Pan around" aria-label="Pan around" style="display:none">✋</button>
+              <button class="chart-card-expand" id="combined-pan" type="button" title="Pan around" aria-label="Pan around" style="display:none"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V6a1.5 1.5 0 0 1 3 0v5"/><path d="M11 11V4.5a1.5 1.5 0 0 1 3 0V11"/><path d="M14 11.5V6a1.5 1.5 0 0 1 3 0v7"/><path d="M17 13v-2a1.5 1.5 0 0 1 3 0v6a5 5 0 0 1-5 5h-2a6 6 0 0 1-5-3l-2.5-4.2c-.5-.8-.2-1.9.7-2.3.7-.3 1.5-.1 2 .5L9 15"/></svg></button>
               <button class="chart-card-expand" id="combined-expand" type="button" title="Expand" aria-label="Expand">⤢</button>
             </div>
             <div class="chart-legend" id="combined-legend"></div>
@@ -75,7 +75,7 @@
       <div class="chart-modal-header">
         <span class="chart-modal-title" id="chart-modal-title"></span>
         <button class="chart-card-expand" id="chart-modal-zoom" type="button" title="Drag to zoom" aria-label="Drag to zoom">🔍</button>
-        <button class="chart-card-expand" id="chart-modal-pan" type="button" title="Pan around" aria-label="Pan around" style="display:none">✋</button>
+        <button class="chart-card-expand" id="chart-modal-pan" type="button" title="Pan around" aria-label="Pan around" style="display:none"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V6a1.5 1.5 0 0 1 3 0v5"/><path d="M11 11V4.5a1.5 1.5 0 0 1 3 0V11"/><path d="M14 11.5V6a1.5 1.5 0 0 1 3 0v7"/><path d="M17 13v-2a1.5 1.5 0 0 1 3 0v6a5 5 0 0 1-5 5h-2a6 6 0 0 1-5-3l-2.5-4.2c-.5-.8-.2-1.9.7-2.3.7-.3 1.5-.1 2 .5L9 15"/></svg></button>
         <button class="chart-card-expand" id="chart-modal-close" type="button" title="Close" aria-label="Close">×</button>
       </div>
       <div class="chart-modal-body" id="chart-modal-body"></div>
@@ -94,6 +94,10 @@
 
   // Categorical palette (dataviz skill, slots 1-4: blue, orange, aqua, yellow)
   const PALETTE = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100'];
+
+  // Monochrome hand/pan icon (inherits the button's text color via currentColor)
+  // instead of the default yellow-skinned ✋ emoji.
+  const HAND_ICON_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V6a1.5 1.5 0 0 1 3 0v5"/><path d="M11 11V4.5a1.5 1.5 0 0 1 3 0V11"/><path d="M14 11.5V6a1.5 1.5 0 0 1 3 0v7"/><path d="M17 13v-2a1.5 1.5 0 0 1 3 0v6a5 5 0 0 1-5 5h-2a6 6 0 0 1-5-3l-2.5-4.2c-.5-.8-.2-1.9.7-2.3.7-.3 1.5-.1 2 .5L9 15"/></svg>';
 
   const input = document.getElementById('location-id');
   const btn = document.getElementById('submit-btn');
@@ -119,7 +123,7 @@
   let expanded = null;
 
   function mirrorButton(from, to) {
-    to.textContent = from.textContent;
+    to.innerHTML = from.innerHTML;
     to.title = from.title;
     to.setAttribute('aria-label', from.title);
     to.classList.toggle('is-reset', from.classList.contains('is-reset'));
@@ -595,7 +599,7 @@
     handBtn.type = 'button';
     handBtn.title = 'Pan around';
     handBtn.setAttribute('aria-label', 'Pan around');
-    handBtn.textContent = '✋';
+    handBtn.innerHTML = HAND_ICON_SVG;
     handBtn.style.display = 'none';
 
     const expandBtn = document.createElement('button');
