@@ -299,6 +299,60 @@ h1.title {
   pointer-events: none;
 }
 
+.top5-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.top5-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.top5-table th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  padding: 0 8px 8px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.top5-table td {
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.top5-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.top5-rank {
+  width: 20px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.top5-price,
+.top5-table th.top5-price {
+  text-align: right;
+  font-weight: 700;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.top5-empty {
+  text-align: center;
+  color: var(--text-muted);
+  white-space: normal;
+}
+
 .chart-modal {
   position: fixed;
   inset: 0;
