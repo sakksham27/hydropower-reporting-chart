@@ -6,6 +6,11 @@ live-streaming charts.
 
 ## What it does
 
+- The home page lets you jump straight to a site: toggle ISO-NE or NYISO,
+  pick a site by name from a live autocomplete list, and it opens the right
+  dashboard with that site's chart already loading. It also has a short
+  intro, a feature card per ISO, and a glossary of LMP/PTID/ISO terms for
+  first-time visitors.
 - Enter a site ID and the app pulls the last 7 days of real-time price data
   for that site directly from the ISO's public historical reports, filters
   it to that site, and streams it back to the browser as it's fetched
@@ -20,7 +25,8 @@ live-streaming charts.
   view, and a per-site CSV export.
 - A Top 5 Price Records table (deduped within a 10-minute window per site,
   sortable by any column) summarizes the week's biggest price events across
-  whichever sites are currently plotted.
+  whichever sites are currently plotted, with a one-line summary below it
+  naming the single best price of the week.
 - Site names are resolved server-side: ISO-NE's hourly LMP report includes a
   Location ID -> Name mapping (with zone/hub/interface prefixes like `.Z.`
   stripped); NYISO's daily CSV already includes the name next to each PTID.
@@ -52,8 +58,10 @@ Then open http://localhost:3215.
     └── dashboard.js          # shared dashboard logic (charts, zoom/pan, table, tooltips)
 ```
 
-Routes: `/` (Home), `/iso-ne`, `/nyiso`, and the SSE data streams
-`/api/isone/stream?id=<location_id>` / `/api/nyiso/stream?id=<ptid>`.
+Routes: `/` (Home), `/iso-ne`, `/nyiso` (both accept an optional
+`?id=<site_id>` to auto-load that site's chart on page load), the site-list
+endpoints `/api/isone/locations` / `/api/nyiso/locations`, and the SSE data
+streams `/api/isone/stream?id=<location_id>` / `/api/nyiso/stream?id=<ptid>`.
 
 ## License
 
