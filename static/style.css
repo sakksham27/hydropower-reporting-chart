@@ -540,20 +540,149 @@ h1.title {
   stroke-linejoin: round;
 }
 
-.coming-soon {
+.home-content {
   flex: 1 1 auto;
   min-height: 0;
-  max-width: 1200px;
+  max-width: 900px;
   width: 100%;
   margin: 0 auto;
+  overflow-y: auto;
   display: flex;
-  align-items: center;
-  justify-content: center;
+  flex-direction: column;
+  gap: 20px;
+  padding-bottom: 8px;
+}
+
+.home-intro {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 10px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  padding: 20px 24px;
+}
+
+.home-intro p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
   color: var(--text-muted);
+}
+
+.home-search {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  padding: 20px 24px;
+}
+
+.home-search .search-bar {
+  max-width: none;
+  margin: 0;
+}
+
+.home-search .page-status {
+  max-width: none;
+  margin: 8px 0 0 0;
+  text-align: left;
+}
+
+.iso-toggle {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.iso-toggle-btn {
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.iso-toggle-btn:hover {
+  color: var(--text);
+}
+
+.iso-toggle-btn.active {
+  color: var(--accent);
+  background: var(--accent-tint);
+  border-color: var(--accent-tint-border);
+}
+
+.feature-cards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+
+.feature-card {
+  display: block;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  padding: 20px 24px;
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 0.15s ease;
+}
+
+.feature-card:hover {
+  border-color: var(--accent);
+}
+
+.feature-card h2 {
+  margin: 0 0 6px 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.feature-card p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.glossary {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  padding: 20px 24px;
+}
+
+.glossary h2 {
+  margin: 0 0 12px 0;
   font-size: 15px;
   font-weight: 600;
+  color: var(--text);
+}
+
+.glossary dl {
+  margin: 0;
+}
+
+.glossary dt {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  margin-top: 10px;
+}
+
+.glossary dt:first-child {
+  margin-top: 0;
+}
+
+.glossary dd {
+  margin: 2px 0 0 0;
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.5;
 }

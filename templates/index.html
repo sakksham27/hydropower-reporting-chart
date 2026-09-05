@@ -16,9 +16,127 @@
     <a href="/nyiso">NYISO</a>
   </div>
 
-  <div class="coming-soon">
-    Coming soon
+  <div class="home-content">
+
+    <section class="home-intro">
+      <p>
+        This dashboard pulls the last 7 days of real-time locational marginal
+        price (LMP) data straight from the public historical reports of two
+        grid operators, <strong>ISO-NE</strong> (New England) and
+        <strong>NYISO</strong> (New York), and streams it to the
+        browser as it's fetched. Chart up to 4 sites at once per ISO, compare
+        them on a combined chart, and see the week's biggest price events in
+        one table.
+      </p>
+    </section>
+
+    <section class="home-search">
+      <label class="field-label" for="home-location-id">Jump to a site</label>
+      <div class="iso-toggle" id="iso-toggle">
+        <button type="button" class="iso-toggle-btn active" data-iso="isone">ISO-NE</button>
+        <button type="button" class="iso-toggle-btn" data-iso="nyiso">NYISO</button>
+      </div>
+      <div class="search-bar">
+        <input type="text" id="home-location-id" list="home-site-options" autocomplete="off" placeholder="Enter or pick a site ID">
+        <datalist id="home-site-options"></datalist>
+        <button id="home-submit-btn" type="button" disabled>Go</button>
+      </div>
+      <p class="page-status" id="home-page-status"></p>
+    </section>
+
+    <section class="feature-cards">
+      <a class="feature-card" href="/iso-ne">
+        <h2>ISO-NE</h2>
+        <p>New England real-time LMP by pricing node. Example site ID: 321.</p>
+      </a>
+      <a class="feature-card" href="/nyiso">
+        <h2>NYISO</h2>
+        <p>New York real-time LMP by pricing node. Example site ID: 24138.</p>
+      </a>
+    </section>
+
+    <section class="glossary">
+      <h2>Glossary</h2>
+      <dl>
+        <dt>LMP</dt>
+        <dd>Locational Marginal Price: the real-time cost of energy at a specific grid location, in $/MWh.</dd>
+        <dt>Site ID / Location ID / PTID</dt>
+        <dd>The identifier for a pricing node on the grid. ISO-NE calls it a Location ID; NYISO calls it a PTID.</dd>
+        <dt>ISO</dt>
+        <dd>Independent System Operator: the regional grid operator that publishes this pricing data.</dd>
+      </dl>
+    </section>
+
   </div>
+
+<script>
+(function () {
+  const toggleBtns = Array.from(document.querySelectorAll('.iso-toggle-btn'));
+  const input = document.getElementById('home-location-id');
+  const btn = document.getElementById('home-submit-btn');
+  const status = document.getElementById('home-page-status');
+  const datalist = document.getElementById('home-site-options');
+
+  const locationsByIso = { isone: [], nyiso: [] };
+  let activeIso = 'isone';
+
+  function populateDatalist() {
+    datalist.innerHTML = '';
+    locationsByIso[activeIso].forEach(function (loc) {
+      const opt = document.createElement('option');
+      opt.value = loc.id;
+      opt.label = loc.name;
+      datalist.appendChild(opt);
+    });
+  }
+
+  fetch('/api/isone/locations')
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      locationsByIso.isone = data.locations || [];
+      if (activeIso === 'isone') populateDatalist();
+    })
+    .catch(function () {});
+
+  fetch('/api/nyiso/locations')
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      locationsByIso.nyiso = data.locations || [];
+      if (activeIso === 'nyiso') populateDatalist();
+    })
+    .catch(function () {});
+
+  toggleBtns.forEach(function (b) {
+    b.addEventListener('click', function () {
+      toggleBtns.forEach(function (o) { o.classList.remove('active'); });
+      b.classList.add('active');
+      activeIso = b.dataset.iso;
+      populateDatalist();
+      input.value = '';
+      btn.disabled = true;
+      status.textContent = '';
+    });
+  });
+
+  input.addEventListener('input', function () {
+    btn.disabled = !input.value.trim();
+  });
+
+  input.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && !btn.disabled) btn.click();
+  });
+
+  btn.addEventListener('click', function () {
+    const id = input.value.trim();
+    if (!id) {
+      status.textContent = 'Enter a site ID first.';
+      return;
+    }
+    const path = activeIso === 'isone' ? '/iso-ne' : '/nyiso';
+    window.location.href = path + '?id=' + encodeURIComponent(id);
+  });
+})();
+</script>
 
 </body>
 </html>

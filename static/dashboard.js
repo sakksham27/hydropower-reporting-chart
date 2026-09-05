@@ -952,4 +952,9 @@ function initDashboard(config) {
   input.addEventListener('input', function () {
     btn.disabled = !input.value.trim();
   });
+
+  const initialId = new URLSearchParams(window.location.search).get('id');
+  if (initialId && initialId.trim()) {
+    createChart(initialId.trim(), slots[0]);
+  }
 }
