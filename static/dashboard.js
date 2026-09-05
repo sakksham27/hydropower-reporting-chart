@@ -935,7 +935,7 @@ function initDashboard(config) {
     }
     const freeSlot = slots.find(s => !activeCharts.has(s));
     if (!freeSlot) {
-      pageStatus.textContent = `Maximum of ${MAX_CHARTS} graphs — remove one (×) to add another.`;
+      pageStatus.textContent = `Maximum of ${MAX_CHARTS} graphs. Remove one (×) to add another.`;
       return;
     }
     pageStatus.textContent = '';
