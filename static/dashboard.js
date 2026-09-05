@@ -40,6 +40,7 @@ function initDashboard(config) {
   const combinedZoomBtn = document.getElementById('combined-zoom');
   const combinedPanBtn = document.getElementById('combined-pan');
   const top5Body = document.getElementById('top5-body');
+  const top5Summary = document.getElementById('top5-summary');
   const siteOptions = document.getElementById('site-options');
 
   fetch(config.locationsUrl)
@@ -364,6 +365,16 @@ function initDashboard(config) {
     });
     top5Rows = dedupeTop5(all);
     renderTop5Table();
+    updateTop5Summary();
+  }
+
+  function updateTop5Summary() {
+    if (top5Rows.length === 0) {
+      top5Summary.textContent = "Submit a site to see this week's best price.";
+      return;
+    }
+    const best = top5Rows.find(rec => rec.rank === 1);
+    top5Summary.textContent = `Best price this week: ${best.site} hit $${best.price.toFixed(2)} on ${formatDay(best.t)} at ${formatHour(best.t)}.`;
   }
 
   function sortedTop5Rows() {

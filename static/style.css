@@ -467,6 +467,23 @@ h1.title {
   white-space: normal;
 }
 
+.top5-sep {
+  flex: 0 0 auto;
+  width: 100%;
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 4px 0 8px 0;
+}
+
+.top5-summary {
+  flex: 0 0 auto;
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  text-align: center;
+}
+
 .chart-modal {
   position: fixed;
   inset: 0;
